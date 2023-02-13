@@ -1,8 +1,6 @@
-import shutil
 import os
 import urllib.request
-import requests
-import json
+from PIL import Image
 from Wetterdienst_Service import WetterdienstService
 
 
@@ -84,6 +82,22 @@ class PreprocessingService:
 
         return cleaned_filename
 
+    def resize_images(self,data_dir,img_height, img_width):
+        for filename in os.listdir(data_dir):
+            if filename.endswith(".jpg"):
+                image = Image.open(os.path.join(data_dir, filename))
+                resized_image = image.resize((img_height, img_width))
+
+                # Konvertieren in RGB-Modus, falls das Bild im RGBA-Modus vorliegt
+                if resized_image.mode == "RGBA":
+                    resized_image = resized_image.convert("RGB")
+                resized_image.save(os.path.join(data_dir, filename))
+
+    def check_image_size(self,data_dir):
+        for filename in os.listdir(data_dir):
+            if filename.endswith(".jpg"):
+                image = Image.open(os.path.join(data_dir, filename))
+                return image.size
 
 
 
