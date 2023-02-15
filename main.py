@@ -1,4 +1,3 @@
-from Wetterdienst_Service import WetterdienstService
 from cnn.Preprocessing_Service import PreprocessingService
 import os
 

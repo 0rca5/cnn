@@ -4,7 +4,8 @@ from tensorflow import keras
 from keras import layers
 import matplotlib.pyplot as plt
 from kerastuner.tuners import RandomSearch
-
+import numpy as np
+from keras.preprocessing import image
 
 class WeatherCNN:
     def __init__(self, data_dir, num_classes):
@@ -32,6 +33,11 @@ class WeatherCNN:
         self.val_ds = self.__optimize_validation_data(val_ds)
 
     def __normalize_data(self, data):
+        """
+        Erstellt eine Normalisation-Schicht, dessen Parameter an die übergebenen Daten angepasst sind.
+        :param data: Daten, an den der Normalisation-Schicht angepasst werden soll.
+        :return: Normalisation-Schicht
+        """
         # Definieren der Normalisierungsschicht.
         normalization_layer = Normalization()
         # Passt Normalisierungswerte(Mittelwert & Varianz) an die Bilddaten an.
@@ -126,10 +132,18 @@ class WeatherCNN:
             layers.Dropout(0.3),
             layers.Dense(self.num_classes)
         ])
+
+        print(self.model.summary())
         return self.model
 
-    def search_optimal_hyperparameter(self, epochs=1):
-        """ führt eine Suche nach den optimalen Hyperparametern durch"""
+    def search_optimal_hyperparameter(self, epochs=1, executions_per_trial=3, max_trials=10):
+        """
+        führt eine Suche nach den optimalen Hyperparametern durch
+
+        :param epochs: Anzahl der Epochen die eine Hyperparameter-Kombination (CNN-Architektur) trainiert werden soll
+        :param executions_per_trial: Anzahl an Trainingsversuchen pro Hyperparameter-Kombination (CNN-Architektur)
+        :param max_trials: Maximale Anzahl an Hyperparameter-Kombinationen (CNN-Architekturen)
+        """
 
         # Hyperparameter-Suche
         tuner = RandomSearch(
@@ -137,9 +151,9 @@ class WeatherCNN:
             # Zielwert, anhand dessen Modelle verglichen werden
             objective='val_accuracy',
             # Maximale Anzahl an Hyperparameter-Kombinationen, also verschiedenen Modellen
-            max_trials=10,
+            max_trials=max_trials,
             # Anzahl der Durchgänge pro Hyperparameter-Kombination (erreichter Maximalwert wird genommen)
-            executions_per_trial=3,
+            executions_per_trial=executions_per_trial,
             # Ort an dem die Ergebnisse gespeichert werden
             directory='tuner',
             project_name='weather_classification',
@@ -218,10 +232,73 @@ class WeatherCNN:
         print('Genauigkeit auf dem Validierungsdatensatz:', test_acc)
 
 
+    def predict(self, data, verbose=2):
+        """
+        Liefert eine Vorhersage anhand des Models für ein oder mehrere Bild(er)
+        :param data: (String oder tf.dataset) Bild(er), für die es eine Vorhersage zu treffen gilt
+        :param verbose: Sichtbarkeit
+        :return: (int oder list(int)) vorhergesagtes Label
+        """
+
+        # Für ein Bild. Muss als URL-String übergeben wird
+        if isinstance(data, str):
+            img = keras.preprocessing.image.load_img(data, target_size=(self.img_height, self.img_width))
+            img_array = keras.preprocessing.image.img_to_array(img)
+
+            # Fügt eine neue Dimension an den Anfang von img_array.
+            img_array = np.expand_dims(img_array, 0)
+            # img_array hat jetzt die Form (1,self.img_height,self.img_width)
+
+            normalized_img = self.normalization_layer(img_array)
+
+            prediction = self.model.predict(normalized_img, verbose=verbose)
+
+            # Liefert die Klasse mit der höchsten Wahrscheinlichkeit
+            predicted_class = tf.argmax(prediction[0]).numpy()
+
+            return predicted_class
+
+        # Für mehrere Bilder. Muss in Form eines tensorflow-datasets vorliegen
+        else:
+            prediction = self.model.predict(data, verbose=verbose)
+            predicted_classes = tf.argmax(prediction, axis=1).numpy()
+
+            return predicted_classes
+
+
+    # TODO: Diese Funktion soll eine Feature-Map anzeigen
+    def show_feature_map(self, layer_name, filter_index, url):
+        """
+        Plots the activation map for a specific filter of a specific layer
+        :param layer_name: name of the convolutional layer
+        :param filter_index: index of the filter
+        :return: None
+        """
+        layer_outputs = [layer.output for layer in self.model.layers if layer.name == layer_name]
+        if not layer_outputs:
+            print(f"No layer with name {layer_name} found in model")
+            return
+
+        activation_model = tf.keras.models.Model(inputs=self.model.input, outputs=layer_outputs)
+
+        img_path = url
+        img = tf.keras.preprocessing.image.load_img(img_path, target_size=(self.img_height, self.img_width))
+        img_tensor = tf.keras.preprocessing.image.img_to_array(img)
+        img_tensor = tf.keras.preprocessing.image.smart_resize(img_tensor, (self.img_height, self.img_width))
+        img_tensor = img_tensor.reshape((1, self.img_height, self.img_width, 3))
+        img_tensor = self.normalization_layer(img_tensor)
+
+        activations = activation_model.predict(img_tensor)
+
+        feature_map = activations[0][0, :, :, filter_index]
+        plt.matshow(feature_map, cmap='viridis')
+        plt.show()
+
+
 if __name__ == "__main__":
     cnn = WeatherCNN(r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle", 11)
 
-    #TODO: Abfrage in Funktion umwandeln
+    # TODO: Abfrage in Funktion umwandeln
     search = False
     # mit vorheriger Hyperparameter-Suche
     if search:
@@ -229,6 +306,14 @@ if __name__ == "__main__":
 
     cnn.plot_training_process(cnn.train())
     cnn.evaluate()
+
+    cnn.show_feature_map('conv2d_2', 3, r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle\lightning\1842.jpg")
+
+
+
+
+
+
 
 
 

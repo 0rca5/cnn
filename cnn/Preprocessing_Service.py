@@ -1,7 +1,7 @@
 import os
 import urllib.request
 from PIL import Image
-from Wetterdienst_Service import WetterdienstService
+from Service import WetterdienstService
 
 
 class PreprocessingService:
@@ -48,7 +48,7 @@ class PreprocessingService:
 
         return weather_categories_dict
 
-    def download_image(cls,url, local_path):
+    def __download_image(cls,url, local_path):
         """
         Herunterladen eines Bildes von einer URL und Speichern in einem lokalen Ordner.
 
@@ -67,12 +67,12 @@ class PreprocessingService:
     def downloading_files_from_a_list(cls, list_name, folder_path):
 
         for i in list_name:
-            future_file_name = folder_path + "/" + cls.translate_into_clean_filename(i).split("processed")[1] + ".jpg"
-            cls._instance.download_image(
+            future_file_name = folder_path + "/" + cls.__translate_into_clean_filename(i).split("processed")[1] + ".jpg"
+            cls._instance.__download_image(
                  i, future_file_name,)
         return
 
-    def translate_into_clean_filename(cls, filename):
+    def __translate_into_clean_filename(cls, filename):
         chars_to_replace = '<>:"/\\|?*'
 
         # Erstellen einer Übersetzungstabelle, die die Zeichen aus chars_to_replace durch Unterstriche ersetzt
