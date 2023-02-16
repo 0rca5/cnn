@@ -63,11 +63,12 @@ class PreprocessingService:
             print("Das Bild wurde erfolgreich heruntergeladen und gespeichert.")
         except Exception as e:
             print("Fehler beim Herunterladen des Bildes: ", e)
+            raise e
 
     def downloading_files_from_a_list(cls, list_name, folder_path):
 
         for i in list_name:
-            future_file_name = folder_path + "/" + cls.__translate_into_clean_filename(i).split("processed")[1] + ".jpg"
+            future_file_name = folder_path + "/" + cls.__translate_into_clean_filename(i) + ".jpg"
             cls._instance.__download_image(
                  i, future_file_name,)
         return
@@ -80,11 +81,14 @@ class PreprocessingService:
 
         cleaned_filename = filename.translate(translation_table)
 
+        if "processed" in cleaned_filename:
+            cleaned_filename = cleaned_filename.split("processed")[1]
+
         return cleaned_filename
 
-    def resize_images(self,data_dir,img_height, img_width):
+    def resize_images(self, data_dir, img_height, img_width):
         for filename in os.listdir(data_dir):
-            if filename.endswith(".jpg"):
+            if filename.endswith(".jpg") or filename.endswith(".png"):
                 image = Image.open(os.path.join(data_dir, filename))
                 resized_image = image.resize((img_height, img_width))
 
@@ -92,6 +96,7 @@ class PreprocessingService:
                 if resized_image.mode == "RGBA":
                     resized_image = resized_image.convert("RGB")
                 resized_image.save(os.path.join(data_dir, filename))
+        return
 
     def check_image_size(self,data_dir):
         for filename in os.listdir(data_dir):

@@ -3,13 +3,13 @@ from keras.layers import Normalization
 from tensorflow import keras
 from keras import layers
 import matplotlib.pyplot as plt
-from kerastuner.tuners import RandomSearch
+from keras_tuner.tuners import RandomSearch
 import numpy as np
 from keras.preprocessing import image
 
 class WeatherCNN:
     def __init__(self, data_dir, num_classes):
-        self.model = None
+        self._model = None
         self.batch_size = 32
         self.img_height = 128
         self.img_width = 128
@@ -34,7 +34,7 @@ class WeatherCNN:
 
     def __normalize_data(self, data):
         """
-        Erstellt eine Normalisation-Schicht, dessen Parameter an die übergebenen Daten angepasst sind.
+        Erstellt eine Normalisierungsschicht, dessen Parameter an die übergebenen Daten angepasst sind.
         :param data: Daten, an den der Normalisation-Schicht angepasst werden soll.
         :return: Normalisation-Schicht
         """
@@ -83,7 +83,7 @@ class WeatherCNN:
     def build_model_for_hyperparameter_search(self, hp):
         """Definiert eine CNN-Architektur für die Suche nach den optimalen Hyperparametern"""
 
-        self.model = keras.Sequential([
+        self._model = keras.Sequential([
             layers.Input(shape=(self.img_height,self.img_width, 3)),
             self.normalization_layer,
             # padding = same stellt sicher, dass die Größe des Bildes nach der Faltung unverändert bleibt,
@@ -104,15 +104,15 @@ class WeatherCNN:
             layers.Dense(self.num_classes)
         ])
 
-        self.model.compile(optimizer='adam',
+        self._model.compile(optimizer='adam',
                            loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                            metrics=['accuracy'])
-        return self.model
+        return self._model
 
     def build_standard_model(self):
         """Definiert eine CNN-Architektur"""
 
-        self.model = keras.Sequential([
+        self._model = keras.Sequential([
             layers.Input(shape=(self.img_height,self.img_width, 3)),
             self.normalization_layer,
             # padding = same stellt sicher, dass die Größe des Bildes nach der Faltung unverändert bleibt,
@@ -133,10 +133,10 @@ class WeatherCNN:
             layers.Dense(self.num_classes)
         ])
 
-        print(self.model.summary())
-        return self.model
+        print(self._model.summary())
+        return self._model
 
-    def search_optimal_hyperparameter(self, epochs=1, executions_per_trial=3, max_trials=10):
+    def search_optimal_hyperparameter(self, epochs=3, executions_per_trial=1, max_trials=15):
         """
         führt eine Suche nach den optimalen Hyperparametern durch
 
@@ -169,32 +169,34 @@ class WeatherCNN:
         tuner.results_summary()
 
         # Beste Konfiguration verwenden
-        self.model = tuner.get_best_models(num_models=1)[0]
+        self._model = tuner.get_best_models(num_models=1)[0]
 
-        return self.model
+        return self._model
 
-    def train(self, epochs=10):
+    def train(self, epochs=10, optimizer= "adam", loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)):
         """
-        trainiert ein CNN
+        trainiert ein CNN.
         :param epochs: Anzahl der Trainingsdurchgänge
+        :param optimizer: Optimierer
+        :param loss: Verlustfunktion
         :return: Trainingsprozess (model.fit())
         """
-        if not self.model:
-            self.model = self.build_standard_model()
+        if not self._model:
+            self._model = self.build_standard_model()
 
         # Kompilieren des Modells
-        self.model.compile(optimizer='adam',
-                           loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+        self._model.compile(optimizer=optimizer,
+                           loss=loss,
                            metrics=['accuracy'])
 
         # Trainieren des Modells
-        history = self.model.fit(
+        history = self._model.fit(
             self.train_ds,
             validation_data=self.val_ds,
             epochs=epochs
         )
 
-        self.model.save("best_model.h5")
+        self._model.save("best_model.h5")
 
         return history
 
@@ -228,7 +230,7 @@ class WeatherCNN:
 
     def evaluate(self):
         # Evaluieren des Modells auf dem Validierungsdatensatz
-        test_loss, test_acc = self.model.evaluate(self.val_ds)
+        test_loss, test_acc = self._model.evaluate(self.val_ds)
         print('Genauigkeit auf dem Validierungsdatensatz:', test_acc)
 
 
@@ -251,7 +253,7 @@ class WeatherCNN:
 
             normalized_img = self.normalization_layer(img_array)
 
-            prediction = self.model.predict(normalized_img, verbose=verbose)
+            prediction = self._model.predict(normalized_img, verbose=verbose)
 
             # Liefert die Klasse mit der höchsten Wahrscheinlichkeit
             predicted_class = tf.argmax(prediction[0]).numpy()
@@ -260,54 +262,112 @@ class WeatherCNN:
 
         # Für mehrere Bilder. Muss in Form eines tensorflow-datasets vorliegen
         else:
-            prediction = self.model.predict(data, verbose=verbose)
+            prediction = self._model.predict(data, verbose=verbose)
             predicted_classes = tf.argmax(prediction, axis=1).numpy()
 
             return predicted_classes
 
-
-    # TODO: Diese Funktion soll eine Feature-Map anzeigen
-    def show_feature_map(self, layer_name, filter_index, url):
+    def show_feature_map(self, layer_id, filter_index, url):
         """
-        Plots the activation map for a specific filter of a specific layer
-        :param layer_name: name of the convolutional layer
-        :param filter_index: index of the filter
+        zeigt die Feature-Map für einen spezifischen filter in einem spezifischen convolutional layer
+
+        :param layer_name: Name des convolutional layer
+        :param filter_index: index des filters
+        :param url: URL des Eingabe-Bilds
         :return: None
         """
-        layer_outputs = [layer.output for layer in self.model.layers if layer.name == layer_name]
+        # Ausgabetensor der spezifischen Schicht
+        layer_outputs = [layer.output for layer in self._model.layers if layer.name == layer_id]
+        if not layer_outputs:
+            print(f"No layer with id {layer_id} found in model")
+            return
+
+        # Erstellen eines (Teil-)Modells des ursprünglichen Modells, wobei der Output die spezifische Schicht ist.
+        activation_model = tf.keras.models.Model(inputs=self._model.input, outputs=layer_outputs)
+
+        # Vorverarbeitung des Eingabebilds
+        img_path = url
+        img = tf.keras.preprocessing.image.load_img(img_path, target_size=(self.img_height, self.img_width))
+        img_tensor = tf.keras.preprocessing.image.img_to_array(img)
+        # Resizing
+        img_tensor = tf.keras.preprocessing.image.smart_resize(img_tensor, (self.img_height, self.img_width))
+        img_tensor = img_tensor.reshape((1, self.img_height, self.img_width, 3))
+        # Normalisierung
+        img_tensor = self.normalization_layer(img_tensor)
+
+        # Erstellen der Feature-Maps für das Eingabebild
+        activations = activation_model.predict(img_tensor)
+
+        feature_map = activations[0][:, :, filter_index]
+        plt.matshow(feature_map, cmap='gray')
+        plt.show()
+
+    def show_all_feature_maps(self, layer_name, url):
+        """
+        zeigt alle Feature-Maps eines spezifischen convolutional layers
+
+        :param layer_name: Name des convolutional layer
+        :param url: URL des Eingabebilds
+        :return: None
+        """
+
+        # Ausgabetensor der spezifischen Schicht
+        layer_outputs = [layer.output for layer in self._model.layers if layer.name == layer_name]
         if not layer_outputs:
             print(f"No layer with name {layer_name} found in model")
             return
 
-        activation_model = tf.keras.models.Model(inputs=self.model.input, outputs=layer_outputs)
+        # Erstellen eines (Teil-)Modells des ursprünglichen Modells, wobei der Output die spezifische Schicht ist.
+        activation_model = tf.keras.models.Model(inputs=self._model.input, outputs=layer_outputs)
 
+        # Vorverarbeitung des Eingabebilds
         img_path = url
         img = tf.keras.preprocessing.image.load_img(img_path, target_size=(self.img_height, self.img_width))
         img_tensor = tf.keras.preprocessing.image.img_to_array(img)
+        # Resizing
         img_tensor = tf.keras.preprocessing.image.smart_resize(img_tensor, (self.img_height, self.img_width))
         img_tensor = img_tensor.reshape((1, self.img_height, self.img_width, 3))
+        # Normalisierung
         img_tensor = self.normalization_layer(img_tensor)
 
+        # Erstellen der Feature-Maps für das Eingabebild
         activations = activation_model.predict(img_tensor)
 
-        feature_map = activations[0][0, :, :, filter_index]
-        plt.matshow(feature_map, cmap='viridis')
+        # Konkatenieren der einzelnen Feature-Maps entlang der Tiefenachse: Tiefe entspricht der Anzahl an Filtern
+        feature_maps = np.concatenate(activations, axis=-1)
+
+        # Anzeigen der Feature-Maps, -1 für Tiefenkanal: Anzahl Feature-Maps
+        num_feature_maps = feature_maps.shape[-1]
+        rows = int(np.ceil(np.sqrt(num_feature_maps)))
+        cols = int(np.ceil(num_feature_maps / rows))
+        # axs = Array der Feature-Maps
+        anzeige_fenster, axs = plt.subplots(nrows=rows, ncols=cols, figsize=(10, 10))
+        anzeige_fenster.suptitle(layer_name)
+
+        for i in range(num_feature_maps):
+            row = i // cols
+            col = i % cols
+            axs[row, col].matshow(feature_maps[:, :, i], cmap='gray')
+            axs[row, col].axis('off')
+
         plt.show()
 
 
 if __name__ == "__main__":
     cnn = WeatherCNN(r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle", 11)
 
-    # TODO: Abfrage in Funktion umwandeln
-    search = False
-    # mit vorheriger Hyperparameter-Suche
-    if search:
-        model = cnn.search_optimal_hyperparameter()
+    # # TODO: Abfrage in Funktion umwandeln
+    # search = True
+    # # mit vorheriger Hyperparameter-Suche
+    # if search:
+    #     model = cnn.search_optimal_hyperparameter()
+    #
+    # cnn.plot_training_process(cnn.train())
+    # cnn.evaluate()
+    cnn._model = tf.keras.models.load_model("best_model.h5")
+    cnn.show_all_feature_maps("conv2d", r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle\lightning\1830.jpg")
 
-    cnn.plot_training_process(cnn.train())
-    cnn.evaluate()
 
-    cnn.show_feature_map('conv2d_2', 3, r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle\lightning\1842.jpg")
 
 
 
