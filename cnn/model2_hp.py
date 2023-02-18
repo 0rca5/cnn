@@ -1,11 +1,12 @@
 import tensorflow as tf
+from keras.applications import ResNet152V2
 from keras.layers import Normalization
 from tensorflow import keras
 from keras import layers
 import matplotlib.pyplot as plt
 from keras_tuner.tuners import RandomSearch
 import numpy as np
-from keras.preprocessing import image
+
 
 class WeatherCNN:
     def __init__(self, data_dir, num_classes):
@@ -79,7 +80,6 @@ class WeatherCNN:
 
         return val_ds
 
-
     def build_model_for_hyperparameter_search(self, hp):
         """Definiert eine CNN-Architektur für die Suche nach den optimalen Hyperparametern"""
 
@@ -88,11 +88,14 @@ class WeatherCNN:
             self.normalization_layer,
             # padding = same stellt sicher, dass die Größe des Bildes nach der Faltung unverändert bleibt,
             # indem zusätzliche Pixel zum Ausgangsbild hinzugefügt werden
-            layers.Conv2D(hp.Int('conv1_units', min_value=8, max_value=64, step=8), 3, padding='same', activation='relu'),
+            layers.Conv2D(hp.Int('conv1_units', min_value=8, max_value=64, step=8), 3, padding='same',
+                          activation='relu'),
             layers.MaxPooling2D(pool_size=(2, 2)),
-            layers.Conv2D(hp.Int('conv2_units', min_value=16, max_value=128, step=16), 3, padding='same', activation='relu'),
+            layers.Conv2D(hp.Int('conv2_units', min_value=16, max_value=128, step=16), 3, padding='same',
+                          activation='relu'),
             layers.MaxPooling2D(pool_size=(2, 2)),
-            layers.Conv2D(hp.Int('conv3_units', min_value=32, max_value=256, step=32), 3, padding='same', activation='relu'),
+            layers.Conv2D(hp.Int('conv3_units', min_value=32, max_value=256, step=32), 3, padding='same',
+                          activation='relu'),
             layers.MaxPooling2D(pool_size=(2, 2)),
             # Flatten-Methode wandelt mehrdimensionale Eingabe in 1D(Vektor)-Ausgabe um.
             # Größe des Vektors = Anzahl der Pixel*Farbkanäle.
@@ -104,16 +107,15 @@ class WeatherCNN:
             layers.Dense(self.num_classes)
         ])
 
-        self._model.compile(optimizer='adam',
-                           loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-                           metrics=['accuracy'])
+        self._model.compile(optimizer='adam', loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                            metrics=['accuracy'])
         return self._model
 
     def build_standard_model(self):
         """Definiert eine CNN-Architektur"""
 
         self._model = keras.Sequential([
-            layers.Input(shape=(self.img_height,self.img_width, 3)),
+            layers.Input(shape=(self.img_height, self.img_width, 3)),
             self.normalization_layer,
             # padding = same stellt sicher, dass die Größe des Bildes nach der Faltung unverändert bleibt,
             # indem zusätzliche Pixel zum Ausgangsbild hinzugefügt werden
@@ -130,13 +132,30 @@ class WeatherCNN:
             layers.Dense(128, activation='relu'),
             # Verwendung einer Dropoutrate um Overfitting zu verhindern.
             layers.Dropout(0.3),
-            layers.Dense(self.num_classes)
+            layers.Dense(self.num_classes, activation="softmax")
         ])
 
         print(self._model.summary())
         return self._model
 
-    def search_optimal_hyperparameter(self, epochs=3, executions_per_trial=1, max_trials=15):
+    def build_pretrained_model(self, pretrained_model):
+
+        # Freezing des Modells
+        for layer in pretrained_model.layers:
+            layer.trainable = False
+
+        # Hinzufügen von Schichten für Transfer Learning
+        x = pretrained_model.output
+        x = layers.Flatten()(x)
+        x = layers.Dense(128, activation='relu')(x)
+        x = layers.Dropout(0.3)(x)
+        predictions = layers.Dense(self.num_classes, activation="softmax")(x)
+
+        self._model = tf.keras.models.Model(inputs=pretrained_model.input, outputs=predictions)
+
+        return self._model
+
+    def search_optimal_hyperparameter(self, epochs=3, executions_per_trial=1, max_trials=20):
         """
         führt eine Suche nach den optimalen Hyperparametern durch
 
@@ -173,7 +192,7 @@ class WeatherCNN:
 
         return self._model
 
-    def train(self, epochs=10, optimizer= "adam", loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)):
+    def train(self, epochs=10, optimizer="adam", loss=tf.keras.losses.SparseCategoricalCrossentropy()):
         """
         trainiert ein CNN.
         :param epochs: Anzahl der Trainingsdurchgänge
@@ -185,15 +204,14 @@ class WeatherCNN:
             self._model = self.build_standard_model()
 
         # Kompilieren des Modells
-        self._model.compile(optimizer=optimizer,
-                           loss=loss,
-                           metrics=['accuracy'])
+        self._model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
 
         # Trainieren des Modells
         history = self._model.fit(
             self.train_ds,
             validation_data=self.val_ds,
-            epochs=epochs
+            epochs=epochs,
+            batch_size=32
         )
 
         self._model.save("best_model.h5")
@@ -233,7 +251,6 @@ class WeatherCNN:
         test_loss, test_acc = self._model.evaluate(self.val_ds)
         print('Genauigkeit auf dem Validierungsdatensatz:', test_acc)
 
-
     def predict(self, data, verbose=2):
         """
         Liefert eine Vorhersage anhand des Models für ein oder mehrere Bild(er)
@@ -267,7 +284,7 @@ class WeatherCNN:
 
             return predicted_classes
 
-    def show_feature_map(self, layer_id, filter_index, url):
+    def show_feature_map(self, layer_name, filter_index, url):
         """
         zeigt die Feature-Map für einen spezifischen filter in einem spezifischen convolutional layer
 
@@ -277,9 +294,9 @@ class WeatherCNN:
         :return: None
         """
         # Ausgabetensor der spezifischen Schicht
-        layer_outputs = [layer.output for layer in self._model.layers if layer.name == layer_id]
+        layer_outputs = [layer.output for layer in self._model.layers if layer.name == layer_name]
         if not layer_outputs:
-            print(f"No layer with id {layer_id} found in model")
+            print(f"No layer with id {layer_name} found in model")
             return
 
         # Erstellen eines (Teil-)Modells des ursprünglichen Modells, wobei der Output die spezifische Schicht ist.
@@ -352,20 +369,28 @@ class WeatherCNN:
 
         plt.show()
 
+    def load_model(self, model_to_load):
+        self._model = model_to_load
+
+    def get_model(self):
+        if self._model:
+            return self._model
+        else:
+            raise Exception("class CNN has no model. Try the load_model method first.")
+
 
 if __name__ == "__main__":
     cnn = WeatherCNN(r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle", 11)
 
-    # # TODO: Abfrage in Funktion umwandeln
-    # search = True
-    # # mit vorheriger Hyperparameter-Suche
-    # if search:
-    #     model = cnn.search_optimal_hyperparameter()
-    #
+    #cnn.build_pretrained_model(ResNet152V2(weights='imagenet', include_top=False, input_shape=(cnn.img_height, cnn.img_width, 3)))
+    # cnn.search_optimal_hyperparameter()
     # cnn.plot_training_process(cnn.train())
-    # cnn.evaluate()
-    cnn._model = tf.keras.models.load_model("best_model.h5")
-    cnn.show_all_feature_maps("conv2d", r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle\lightning\1830.jpg")
+    # cnn._model = tf.keras.models.load_model("best_model.h5")
+    # cnn.show_all_feature_maps("conv2d", r"C:\Users\marlo\PycharmProjects\weather_dataset_from_kaggle\lightning\1853.jpg")
+
+    model = tf.keras.models.load_model("best_model.h5")
+    model.summary()
+
 
 
 

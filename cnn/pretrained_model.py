@@ -38,10 +38,13 @@ class KerasCNN:
             class_mode='categorical',
             subset='validation')
 
+
         # Laden des vortrainierten Modells
         resnet_model = ResNet152V2(weights='imagenet',
                                    include_top=False,
                                    input_shape=(self.img_height, self.img_width, 3))
+
+
         # Freezing des Modells
         for layer in resnet_model.layers:
             layer.trainable = False
